@@ -1,0 +1,48 @@
+{
+  "name": "zzx-godot-mcp",
+  "version": "1.0.0",
+  "description": "Full-featured MCP server for Godot 4.6.x game development. Supports 2D, HD-2D, and 3D games.",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "zzx-godot-mcp": "./bin/zzx-godot-mcp.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts"
+  },
+  "keywords": [
+    "mcp",
+    "godot",
+    "game-engine",
+    "game-development",
+    "gdscript",
+    "2d",
+    "3d",
+    "hd2d",
+    "kimi"
+  ],
+  "author": "zzx",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "ws": "^8.18.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/ws": "^8.18.1",
+    "eslint": "^9.25.1",
+    "prettier": "^3.5.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
