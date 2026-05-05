@@ -58,7 +58,7 @@ export function registerFileTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'file_write',
-        description: 'Create or overwrite a text file in the Godot project.',
+        description: 'Create or overwrite a text file in the Godot project. Uses UTF-8 encoding. For Chinese text in .tscn files, always use this tool instead of Shell text replacement to avoid encoding corruption.',
         inputSchema: {
           type: 'object',
           properties: {

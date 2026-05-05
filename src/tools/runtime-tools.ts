@@ -244,7 +244,7 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'runtime_screenshot',
-        description: 'Capture a screenshot from the running game (requires TCP). Returns base64 PNG.',
+        description: 'Capture a screenshot from the running game (requires TCP). Returns base64 PNG. Note: screenshots require a running game with rendering. Headless mode (--headless) produces black images; use this tool or editor_screenshot instead.',
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {

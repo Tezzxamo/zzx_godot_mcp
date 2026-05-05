@@ -111,7 +111,7 @@ export function registerSceneTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'editor_screenshot',
-        description: 'Capture a screenshot from the Godot editor viewport (requires WebSocket). Returns base64 PNG.',
+        description: 'Capture a screenshot from the Godot editor viewport (requires WebSocket). Returns base64 PNG. Use this when the game is not running or for inspecting the editor UI.',
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {

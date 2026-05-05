@@ -29,7 +29,7 @@ export const GODOT_COMMON_PATHS: string[] = [
 
 export const HEADLESS_TIMEOUT_MS = 30000;
 export const WEBSOCKET_TIMEOUT_MS = 10000;
-export const TCP_TIMEOUT_MS = 10000;
+export const TCP_TIMEOUT_MS = 20000;
 
 export const ENV_GODOT_EXECUTABLE = 'GODOT_EXECUTABLE';
 export const ENV_GODOT_PATH = 'GODOT_PATH';
