@@ -1,8 +1,12 @@
 extends Node
 
+const MAX_LOG_ENTRIES = 100
+
 var server: TCPServer
 var clients: Dictionary = {}
 var port: int = 9679
+var _recent_logs: Array = []
+var _recent_errors: Array = []
 
 func start(p: int = 9679):
 	port = p
@@ -36,7 +40,7 @@ func _process(_delta):
 			var available = client.get_available_bytes()
 			if available > 0:
 				var data = client.get_utf8_string(available)
-				_handle_data(client, data)
+				await _handle_data(client, data)
 		elif client.get_status() == StreamPeerTCP.STATUS_NONE or client.get_status() == StreamPeerTCP.STATUS_ERROR:
 			client.disconnect_from_host()
 			clients.erase(conn)
@@ -63,12 +67,15 @@ func _handle_data(client: StreamPeerTCP, data: String):
 		var method = msg.get("method", "")
 		var params = msg.get("params", {})
 		
-		var result = _handle_runtime_command(method, params)
+		var result = await _handle_runtime_command(method, params)
 		_send_response(client, id, result)
 
 func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
+	_log_entry("CMD: " + method + " params=" + JSON.stringify(params))
+	
 	var tree = get_tree()
 	if not tree:
+		_log_error("No scene tree available")
 		return { "error": "No scene tree available" }
 	
 	match method:
@@ -128,14 +135,18 @@ func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
 		"game.screenshot":
 			var viewport = tree.root.get_viewport()
 			var img = viewport.get_texture().get_image()
+			var output_path = params.get("output_path", "")
+			if not output_path.is_empty():
+				var err = img.save_png(output_path)
+				if err == OK:
+					return { "saved": output_path }
+				else:
+					return { "error": "Failed to save screenshot: " + str(err) }
 			return Marshalls.raw_to_base64(img.save_png_to_buffer())
 		
 		"game.performance":
 			return {
 				"fps": Engine.get_frames_per_second(),
-				"frame_time": Engine.get_frame_time(),
-				"process_time": Engine.get_process_time(),
-				"physics_time": Engine.get_physics_time(),
 				"memory": OS.get_static_memory_usage(),
 				"memory_peak": OS.get_static_memory_peak_usage(),
 				"draw_calls": RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
@@ -204,14 +215,53 @@ func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
 			return { "waited": frames }
 		
 		"game.get_errors":
-			var log_path = OS.get_user_data_dir() + "/logs/godot.log"
-			var lines = _read_log_file(log_path)
-			var errors = lines.filter(func(l): return l.contains("ERROR") or l.contains("SCRIPT ERROR"))
-			return { "errors": errors }
+			var log_path = _get_log_file_path()
+			var file_errors = _read_log_file(log_path).filter(func(l): return l.contains("ERROR") or l.contains("SCRIPT ERROR"))
+			var all_errors = _recent_errors.duplicate()
+			all_errors.append_array(file_errors)
+			return { "errors": all_errors, "source": { "memory": _recent_errors.size(), "file": file_errors.size() } }
 		
 		"game.get_logs":
-			var log_path = OS.get_user_data_dir() + "/logs/godot.log"
-			return { "logs": _read_log_file(log_path) }
+			var log_path = _get_log_file_path()
+			var file_logs = _read_log_file(log_path)
+			var all_logs = _recent_logs.duplicate()
+			all_logs.append_array(file_logs)
+			return { "logs": all_logs, "source": { "memory": _recent_logs.size(), "file": file_logs.size() } }
+		
+		"game.find_nodes":
+			var name_pattern = params.get("name_pattern", "")
+			var type_filter = params.get("type", "")
+			var results = []
+			_for_each_node(tree.current_scene, func(n):
+				var match_name = name_pattern.is_empty() or n.name.contains(name_pattern)
+				var match_type = type_filter.is_empty() or n.get_class() == type_filter
+				if match_name and match_type:
+					results.append({ "name": n.name, "type": n.get_class(), "path": n.get_path() })
+			)
+			return { "nodes": results, "count": results.size() }
+		
+		"game.get_node_info":
+			var node = tree.current_scene.get_node_or_null(params.get("path", ""))
+			if not node:
+				return { "error": "Node not found" }
+			return {
+				"name": node.name,
+				"type": node.get_class(),
+				"path": node.get_path(),
+				"properties": _get_node_properties(node),
+				"signals": _get_node_signals(node),
+				"methods": _get_node_methods(node),
+			}
+		
+		"game.reparent_node":
+			var node = tree.current_scene.get_node_or_null(params.get("path", ""))
+			var new_parent = tree.current_scene.get_node_or_null(params.get("new_parent", ""))
+			if not node:
+				return { "error": "Node not found" }
+			if not new_parent:
+				return { "error": "New parent not found" }
+			node.reparent(new_parent)
+			return { "success": true, "new_path": node.get_path() }
 		
 		_:
 			return { "error": "Unknown method: " + method }
@@ -230,6 +280,33 @@ func _serialize_node(node: Node) -> Dictionary:
 			result.children.append(_serialize_node(child))
 	return result
 
+func _for_each_node(node: Node, callback: Callable):
+	if not is_instance_valid(node):
+		return
+	callback.call(node)
+	for child in node.get_children():
+		_for_each_node(child, callback)
+
+func _get_node_properties(node: Node) -> Dictionary:
+	var result = {}
+	for prop in node.get_property_list():
+		if prop["usage"] & PROPERTY_USAGE_EDITOR:
+			result[prop["name"]] = node.get(prop["name"])
+	return result
+
+func _get_node_signals(node: Node) -> Array:
+	var result = []
+	for sig in node.get_signal_list():
+		var connections = node.get_signal_connection_list(sig["name"])
+		result.append({
+			"name": sig["name"],
+			"connections": connections.map(func(c): return { "target": c["callable"].get_object().get_path(), "method": c["callable"].get_method() })
+		})
+	return result
+
+func _get_node_methods(node: Node) -> Array:
+	return node.get_method_list().map(func(m): return m["name"])
+
 func _read_log_file(log_path: String, max_lines: int = 100) -> Array:
 	if not FileAccess.file_exists(log_path):
 		return []
@@ -241,6 +318,24 @@ func _read_log_file(log_path: String, max_lines: int = 100) -> Array:
 	if lines.size() > max_lines:
 		lines = lines.slice(lines.size() - max_lines, lines.size())
 	return lines
+
+func _get_log_file_path() -> String:
+	if OS.has_method("get_log_file_path"):
+		return OS.call("get_log_file_path")
+	var p = ProjectSettings.get_setting("debug/file_logging/log_path", "")
+	if not p.is_empty():
+		return p
+	return OS.get_user_data_dir() + "/logs/godot.log"
+
+func _log_entry(msg: String):
+	_recent_logs.append(msg)
+	if _recent_logs.size() > MAX_LOG_ENTRIES:
+		_recent_logs.pop_front()
+
+func _log_error(msg: String):
+	_recent_errors.append(msg)
+	if _recent_errors.size() > MAX_LOG_ENTRIES:
+		_recent_errors.pop_front()
 
 func _dict_to_vector(d: Dictionary) -> Variant:
 	if d.has("z"):

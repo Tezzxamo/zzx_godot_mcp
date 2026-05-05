@@ -1,0 +1,37 @@
+[gd_scene format=3 uid="uid://cm3d4k5x7q1p2" load_steps=2]
+
+[ext_resource type="Script" path="res://addons/zzx_godot_mcp/ui/mcp_panel.gd" id="1_mcp"]
+
+[node name="McpPanel" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_mcp")
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+offset_right = 250.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Title" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 14
+text = "ZZX Godot MCP"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="VBoxContainer"]
+layout_mode = 2
+
+[node name="WebSocketStatus" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "WebSocket: initializing..."
+
+[node name="TCPStatus" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+text = "TCP: initializing..."

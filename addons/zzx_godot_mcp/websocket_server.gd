@@ -4,7 +4,7 @@ extends Node
 var server: TCPServer
 var peers: Dictionary = {}
 var editor_plugin: EditorPlugin
-var command_router: CommandRouter
+var command_router
 
 func _ready():
 	command_router = preload("command_router.gd").new()

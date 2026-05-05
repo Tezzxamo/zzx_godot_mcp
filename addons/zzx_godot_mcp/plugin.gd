@@ -23,7 +23,8 @@ func _enter_tree():
 	panel = preload("ui/mcp_panel.tscn").instantiate() if ResourceLoader.exists("res://addons/zzx_godot_mcp/ui/mcp_panel.tscn") else null
 	if panel:
 		add_control_to_dock(DOCK_SLOT_RIGHT_BL, panel)
-		panel.update_status("WebSocket: 9678", Color.GREEN)
+		panel.update_status("WebSocket: 9678 (listening)", Color.GREEN)
+		panel.update_status("TCP: 9679 (listening)", Color.GREEN)
 
 func _exit_tree():
 	if ws_server:

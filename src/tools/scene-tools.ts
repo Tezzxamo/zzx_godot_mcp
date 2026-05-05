@@ -111,10 +111,18 @@ export function registerSceneTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'editor_screenshot',
-        description: 'Capture a screenshot from the Godot editor viewport (requires WebSocket). Returns base64 PNG. Use this when the game is not running or for inspecting the editor UI.',
-        inputSchema: { type: 'object', properties: {} },
+        description: 'Capture a screenshot from the Godot editor viewport (requires WebSocket). Returns base64 PNG by default, or saves to file if output_path is provided. Use this when the game is not running or for inspecting the editor UI.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            output_path: {
+              type: 'string',
+              description: 'Optional absolute file path to save the PNG screenshot (e.g. "E:/project/screenshot.png"). If omitted, returns base64 image data.',
+            },
+          },
+        },
       },
-      handler: async (_args) => {
+      handler: async (args) => {
         const ws = server.getWebSocket();
         if (!ws.isConnected()) {
           return {
@@ -129,15 +137,20 @@ export function registerSceneTools(server: ZzxGodotServer): void {
             isError: true,
           };
         }
+        const outputPath = args.output_path as string | undefined;
         const resp = await ws.send({
           id: `${Date.now()}`,
           method: 'editor.take_screenshot',
-          params: {},
+          params: outputPath ? { output_path: outputPath } : {},
         });
         if (resp.error) {
           return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         }
-        const base64 = resp.result as string;
+        const result = resp.result as Record<string, unknown> | string;
+        if (result && typeof result === 'object' && result.saved) {
+          return { content: [{ type: 'text', text: `Screenshot saved to: ${result.saved}` }] };
+        }
+        const base64 = result as string;
         return {
           content: [
             { type: 'text', text: 'Editor screenshot captured:' },

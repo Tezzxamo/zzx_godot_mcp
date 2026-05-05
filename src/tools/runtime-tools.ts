@@ -244,16 +244,33 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'runtime_screenshot',
-        description: 'Capture a screenshot from the running game (requires TCP). Returns base64 PNG. Note: screenshots require a running game with rendering. Headless mode (--headless) produces black images; use this tool or editor_screenshot instead.',
-        inputSchema: { type: 'object', properties: {} },
+        description: 'Capture a screenshot from the running game (requires TCP). Returns base64 PNG by default, or saves to file if output_path is provided. Note: screenshots require a running game with rendering. Headless mode (--headless) produces black images; use this tool or editor_screenshot instead.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            output_path: {
+              type: 'string',
+              description: 'Optional absolute file path to save the PNG screenshot (e.g. "E:/project/screenshot.png"). If omitted, returns base64 image data.',
+            },
+          },
+        },
       },
-      handler: async (_args) => {
+      handler: async (args) => {
         if (!(await ensureTcpConnected())) {
           return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.screenshot', params: {} });
+        const outputPath = args.output_path as string | undefined;
+        const resp = await server.getTcp().send({
+          id: `${Date.now()}`,
+          method: 'game.screenshot',
+          params: outputPath ? { output_path: outputPath } : {},
+        });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
-        const base64 = resp.result as string;
+        const result = resp.result as Record<string, unknown> | string;
+        if (result && typeof result === 'object' && result.saved) {
+          return { content: [{ type: 'text', text: `Screenshot saved to: ${result.saved}` }] };
+        }
+        const base64 = result as string;
         return {
           content: [
             { type: 'text', text: 'Screenshot captured:' },
@@ -476,6 +493,78 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.set_camera', params: { position: args.position, rotation: args.rotation, zoom: args.zoom } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: 'Camera updated.' }] };
+      },
+      readOnly: false,
+    },
+    {
+      definition: {
+        name: 'runtime_find_nodes',
+        description: 'Find nodes in the running game by name pattern or type (requires TCP).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name_pattern: { type: 'string', description: 'Name substring to search for (optional)' },
+            type_filter: { type: 'string', description: 'Node class type to filter by (optional, e.g. Button, Sprite2D)' },
+          },
+        },
+      },
+      handler: async (args) => {
+        const namePattern = (args.name_pattern as string) || '';
+        const typeFilter = (args.type_filter as string) || '';
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
+        }
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.find_nodes', params: { name_pattern: namePattern, type: typeFilter } });
+        if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
+        return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
+      },
+      readOnly: true,
+    },
+    {
+      definition: {
+        name: 'runtime_get_node_info',
+        description: 'Get detailed info about a node in the running game: properties, signals, methods (requires TCP).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            node_path: { type: 'string', description: 'Absolute node path (e.g. /root/Main/Player)' },
+          },
+          required: ['node_path'],
+        },
+      },
+      handler: async (args) => {
+        const nodePath = requireString(args, 'node_path');
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
+        }
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.get_node_info', params: { path: nodePath } });
+        if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
+        return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
+      },
+      readOnly: true,
+    },
+    {
+      definition: {
+        name: 'runtime_reparent_node',
+        description: 'Move a node to a new parent in the running game (requires TCP).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            node_path: { type: 'string', description: 'Absolute node path to move' },
+            new_parent_path: { type: 'string', description: 'Absolute path of the new parent node' },
+          },
+          required: ['node_path', 'new_parent_path'],
+        },
+      },
+      handler: async (args) => {
+        const nodePath = requireString(args, 'node_path');
+        const newParentPath = requireString(args, 'new_parent_path');
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
+        }
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.reparent_node', params: { path: nodePath, new_parent: newParentPath } });
+        if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
+        return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
       readOnly: false,
     },
