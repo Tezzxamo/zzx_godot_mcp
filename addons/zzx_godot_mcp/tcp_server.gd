@@ -172,10 +172,14 @@ func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
 		
 		"game.emit_signal":
 			var node = tree.current_scene.get_node_or_null(params.get("path", ""))
+			var sig_name = params.get("signal", "")
 			var sig_args = params.get("args", [])
-			if node:
-				node.emit_signal(params.get("signal", ""), sig_args)
-			return { "success": node != null }
+			if not node:
+				return { "success": false }
+			var all_args = [sig_name]
+			all_args.append_array(sig_args)
+			node.callv("emit_signal", all_args)
+			return { "success": true }
 		
 		"game.get_camera":
 			var cam = tree.root.get_camera_3d() if tree.root.get_camera_3d() else tree.root.get_camera_2d()
