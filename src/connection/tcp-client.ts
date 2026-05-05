@@ -50,6 +50,11 @@ export class TcpClient extends BaseConnection {
       socket.on('close', () => {
         this.connected = false;
         this.socket = null;
+        // Clean up pending requests
+        for (const [id, resolver] of this.pendingRequests) {
+          resolver({ id, error: { code: -1, message: 'Connection closed' } });
+        }
+        this.pendingRequests.clear();
         logger.info('TCP disconnected');
       });
     });

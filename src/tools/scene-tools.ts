@@ -110,6 +110,45 @@ export function registerSceneTools(server: ZzxGodotServer): void {
     },
     {
       definition: {
+        name: 'editor_screenshot',
+        description: 'Capture a screenshot from the Godot editor viewport (requires WebSocket). Returns base64 PNG.',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      handler: async (_args) => {
+        const ws = server.getWebSocket();
+        if (!ws.isConnected()) {
+          return {
+            content: [{
+              type: 'text',
+              text: 'WebSocket not connected. Godot editor is not open or MCP plugin is not enabled.\n' +
+                    'Steps to fix:\n' +
+                    '1. Run: launch_editor (or open Godot manually)\n' +
+                    '2. In Godot: Project -> Project Settings -> Plugins -> Enable "ZZX Godot MCP"\n' +
+                    '3. Wait 3 seconds, then retry.',
+            }],
+            isError: true,
+          };
+        }
+        const resp = await ws.send({
+          id: `${Date.now()}`,
+          method: 'editor.take_screenshot',
+          params: {},
+        });
+        if (resp.error) {
+          return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
+        }
+        const base64 = resp.result as string;
+        return {
+          content: [
+            { type: 'text', text: 'Editor screenshot captured:' },
+            { type: 'image', data: base64, mimeType: 'image/png' },
+          ],
+        };
+      },
+      readOnly: true,
+    },
+    {
+      definition: {
         name: 'scene_get_tree',
         description: 'Get the node tree structure of a scene file.',
         inputSchema: {

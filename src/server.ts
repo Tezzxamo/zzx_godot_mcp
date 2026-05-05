@@ -55,6 +55,7 @@ export class ZzxGodotServer {
   private websocket: WebSocketClient;
   private tcp: TcpClient;
   private tools = new Map<string, ToolRegistration>();
+  private reconnectInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: ConnectionConfig) {
     this.config = config;
@@ -129,16 +130,36 @@ export class ZzxGodotServer {
     logger.info(`${MCP_SERVER_NAME} v${MCP_SERVER_VERSION} started with ${this.tools.size} tools.`);
 
     // Try to connect to WebSocket (Godot Editor)
-    try {
-      await this.websocket.connect();
-    } catch {
-      logger.warn(`WebSocket not available at port ${this.config.websocketPort}. Falling back to headless mode.`);
-    }
+    await this.tryConnectWebSocket();
 
     logger.info('Server ready. Waiting for MCP requests.');
   }
 
+  private async tryConnectWebSocket(): Promise<void> {
+    try {
+      await this.websocket.connect();
+      if (this.reconnectInterval) {
+        clearInterval(this.reconnectInterval);
+        this.reconnectInterval = null;
+      }
+      logger.info('WebSocket connected to Godot Editor.');
+    } catch {
+      logger.warn(`WebSocket not available at port ${this.config.websocketPort}. Will retry every 5s...`);
+      if (!this.reconnectInterval) {
+        this.reconnectInterval = setInterval(() => {
+          this.tryConnectWebSocket().catch(() => {
+            // Error already logged inside tryConnectWebSocket
+          });
+        }, 5000);
+      }
+    }
+  }
+
   async stop(): Promise<void> {
+    if (this.reconnectInterval) {
+      clearInterval(this.reconnectInterval);
+      this.reconnectInterval = null;
+    }
     await this.websocket.disconnect();
     await this.tcp.disconnect();
     await this.headless.disconnect();

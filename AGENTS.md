@@ -144,7 +144,15 @@ Godot 编辑器  Godot Headless   正在运行的游戏
 | WebSocket | `WebSocketClient` | 9678（可配置） | 编辑器插件已启用 | 打开/保存场景、编辑器截图、节点检查 |
 | TCP | `TcpClient` | 9679（可配置） | 游戏正在运行且插件已加载 | 暂停、执行脚本、属性获取/设置、实例化、截图 |
 
-如果 WebSocket 在启动时不可用，服务器会记录警告并回退到 headless 模式。TCP 仅在游戏运行时才连接。
+MCP 服务器启动后会自动尝试连接 WebSocket，若失败则每 5 秒自动重试，直到连接成功。`runtime_play` 启动游戏后，TCP Client 会在 3 秒后自动尝试连接。所有 TCP 工具在检测到未连接时也会先尝试一次自动连接，再返回错误。
+
+> **⚠️ Runtime 工具（TCP 端口 9679）的重要限制**
+>
+> TCP 连接要求游戏必须通过 **Godot 编辑器启动**（按 F5 或点击「运行项目」按钮），而非命令行直接运行（如 `godot --path project`）。
+>
+> 原因是：`zzx_godot_mcp` 插件的 TCP 服务器和 WebSocket 服务器由 Godot 编辑器插件在编辑器进程内托管。命令行启动的游戏实例不会加载编辑器插件，因此不会启动 9678/9679 端口的服务器。
+>
+> **推荐工作流**：`launch_editor`（可选，`project_path` 默认自动检测）→ 等待 WebSocket 自动连接 → `runtime_play` 启动游戏 → 等待 3 秒 TCP 自动连接 → `runtime_screenshot` / `runtime_get_tree` / `runtime_eval` 等 TCP 工具可用。
 
 ## 配置
 
@@ -152,7 +160,8 @@ Godot 编辑器  Godot Headless   正在运行的游戏
 
 | 变量 | 默认值 | 描述 |
 |----------|---------|-------------|
-| `GODOT_PATH` | 自动检测 | Godot 可执行文件路径。自动检测先搜索 `PATH`，然后搜索常见的 Windows 安装目录（`C:\Program Files\Godot`、`C:\Godot`、`D:\Godot`、`E:\Godot`）。 |
+| `GODOT_EXECUTABLE` | 自动检测 | Godot 可执行文件路径（优先读取）。自动检测先搜索 `PATH`，然后搜索常见的 Windows 安装目录。 |
+| `GODOT_PATH` | 自动检测 | Godot 可执行文件路径（`GODOT_EXECUTABLE` 的兼容别名）。 |
 | `ZZX_WEBSOCKET_PORT` | 9678 | 编辑器插件的 WebSocket 端口 |
 | `ZZX_TCP_PORT` | 9679 | 运行时游戏的 TCP 端口 |
 | `ZZX_LOG_LEVEL` | info | 级别：`silent`、`error`、`warn`、`info`、`debug` |
@@ -195,7 +204,7 @@ const tools: ToolRegistration[] = [
 | 类别 | 数量 | 模块 |
 |----------|-------|--------|
 | 文件 I/O | 5 | `file-tools.ts` |
-| 场景 | 12 | `scene-tools.ts` |
+| 场景 | 13 | `scene-tools.ts` |
 | 节点 | 15 | `node-tools.ts` |
 | 脚本 | 10 | `script-tools.ts` |
 | 项目 | 11 | `project-tools.ts` |
@@ -264,7 +273,16 @@ npm run test:watch # 监视模式
 2. 在 Godot 编辑器中打开项目
 3. 转到 **项目 → 项目设置 → 插件**
 4. 启用 **ZZX Godot MCP**
-5. WebSocket 服务器自动在端口 9678 上启动；TCP 服务器在游戏运行时启动
+5. WebSocket 服务器自动在端口 9678 上启动；TCP 服务器在编辑器启动时即开始监听端口 9679
+
+## 故障排查
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| `TCP not connected` | 游戏未运行、TCP Server 未启动、或连接尚未建立 | 1) 使用 `launch_editor` 打开编辑器；2) `runtime_play` 启动游戏；3) 等待 3-5 秒让 TCP 自动连接 |
+| `WebSocket connection refused` | 编辑器未打开或插件未启用 | 1) 使用 `launch_editor` 打开编辑器；2) 在 Godot 中启用 ZZX Godot MCP 插件；3) MCP 会自动重连（每 5 秒） |
+| `project.godot not found` | MCP 服务器未检测到项目根目录 | 从项目根目录启动 Kimi CLI，或设置 `ZZX_PROJECT_PATH` 环境变量 |
+| 脚本验证返回 `Script not found` | `res://` 路径解析失败 | 使用绝对路径（`E:/project/scripts/xxx.gd`）而非 `res://` 路径 |
 
 ## 常见任务的关键文件
 
@@ -282,6 +300,8 @@ npm run test:watch # 监视模式
 
 - 项目目标为 **Godot 4.6.x**。场景文件格式为 Godot 4 的 `format=3`。
 - `.tscn` 编辑通过文本操作完成，而不是通过 Godot 的 XML API。使用基于正则表达式的替换时要小心。
-- 当工具需要 WebSocket/TCP 但连接不可用时，处理程序会返回一个友好的错误消息，告诉用户手动执行操作。
+- 当工具需要 WebSocket/TCP 但连接不可用时，处理程序会返回**分步骤的修复指南**（如「运行 launch_editor → 等待 3 秒 → 重试」），而非简单的 "not connected"。
+- `runtime_eval` (`game.eval`) 在 Godot 端采用**双模式执行**：先尝试 `Expression`（简单表达式），失败则回退到临时 `GDScript` 节点执行，支持完整的 GDScript 语法（`if`/`for`/`while`/`get_tree()` 等）。
+- `_serialize_node` 已添加 `is_instance_valid()` 和 `null` 检查，不会因场景中的无效节点而崩溃。
 - `readOnly: true` 工具不应修改文件或游戏状态。这是 MCP 客户端的元数据。
 - 中文 README（`README_CN.md`）与英文版本一起维护。如果更新文档，请保持两者同步。

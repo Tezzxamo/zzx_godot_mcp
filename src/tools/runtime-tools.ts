@@ -5,8 +5,36 @@
 import type { ZzxGodotServer } from '../server.js';
 import type { ToolRegistration } from '../types/index.js';
 import { requireString, optionalString, optionalNumber, requireBoolean } from '../utils/validators.js';
+import * as logger from '../utils/logger.js';
 
 export function registerRuntimeTools(server: ZzxGodotServer): void {
+  /** Try to connect TCP if not already connected. */
+  async function ensureTcpConnected(): Promise<boolean> {
+    const tcp = server.getTcp();
+    if (tcp.isConnected()) return true;
+    try {
+      await tcp.connect();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const WS_ERROR_MSG =
+    'WebSocket not connected. Godot editor is not open or MCP plugin is not enabled.\n' +
+    'Steps to fix:\n' +
+    '1. Run: launch_editor (or open Godot manually)\n' +
+    '2. In Godot: Project -> Project Settings -> Plugins -> Enable "ZZX Godot MCP"\n' +
+    '3. Wait 3 seconds, then retry.';
+
+  const TCP_ERROR_MSG =
+    'TCP not connected. The game is not running or TCP server has not started.\n' +
+    'Steps to fix:\n' +
+    '1. Ensure WebSocket is connected (Godot editor is open)\n' +
+    '2. Run: runtime_play (to start the game from the editor)\n' +
+    '3. Wait 3-5 seconds for TCP server to initialize\n' +
+    '4. Retry this tool.';
+
   const tools: ToolRegistration[] = [
     {
       definition: {
@@ -23,7 +51,7 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         const scenePath = optionalString(args, 'scene_path');
         const ws = server.getWebSocket();
         if (!ws.isConnected()) {
-          return { content: [{ type: 'text', text: 'WebSocket not connected. Start the game manually in Godot.' }], isError: true };
+          return { content: [{ type: 'text', text: WS_ERROR_MSG }], isError: true };
         }
         const resp = await ws.send({
           id: `${Date.now()}`,
@@ -31,7 +59,27 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
           params: scenePath ? { scene: scenePath } : {},
         });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
-        return { content: [{ type: 'text', text: 'Game started.' }] };
+
+        // Auto-connect TCP after game starts
+        setTimeout(async () => {
+          if (!server.getTcp().isConnected()) {
+            try {
+              await server.getTcp().connect();
+              logger.info('TCP auto-connected after runtime_play.');
+            } catch (e) {
+              logger.warn('Auto TCP connect failed after runtime_play:', e);
+            }
+          }
+        }, 3000);
+
+        return {
+          content: [{
+            type: 'text',
+            text: 'Game started from editor.\n' +
+              'TCP status: connecting in 3 seconds...\n' +
+              'If TCP tools fail immediately, wait 3 seconds and retry.',
+          }],
+        };
       },
       readOnly: false,
     },
@@ -44,7 +92,7 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
       handler: async (_args) => {
         const ws = server.getWebSocket();
         if (!ws.isConnected()) {
-          return { content: [{ type: 'text', text: 'WebSocket not connected.' }], isError: true };
+          return { content: [{ type: 'text', text: WS_ERROR_MSG }], isError: true };
         }
         const resp = await ws.send({ id: `${Date.now()}`, method: 'runtime.stop', params: {} });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
@@ -66,11 +114,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
       },
       handler: async (args) => {
         const paused = requireBoolean(args, 'paused');
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected. Game may not be running.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.pause', params: { paused } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.pause', params: { paused } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: paused ? 'Game paused.' : 'Game resumed.' }] };
       },
@@ -90,11 +137,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
       },
       handler: async (args) => {
         const code = requireString(args, 'code');
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected. Cannot eval in running game.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.eval', params: { code } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.eval', params: { code } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -107,11 +153,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.get_tree', params: {} });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.get_tree', params: {} });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -133,11 +178,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
       handler: async (args) => {
         const nodePath = requireString(args, 'node_path');
         const property = requireString(args, 'property');
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.get_property', params: { path: nodePath, property } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.get_property', params: { path: nodePath, property } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -161,11 +205,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         const nodePath = requireString(args, 'node_path');
         const property = requireString(args, 'property');
         const value = args.value;
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.set_property', params: { path: nodePath, property, value } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.set_property', params: { path: nodePath, property, value } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: `Set ${nodePath}.${property} = ${JSON.stringify(value)}` }] };
       },
@@ -189,11 +232,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         const nodePath = requireString(args, 'node_path');
         const method = requireString(args, 'method');
         const methodArgs = (args.args as unknown[]) || [];
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.call_method', params: { path: nodePath, method, args: methodArgs } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.call_method', params: { path: nodePath, method, args: methodArgs } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -206,11 +248,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.screenshot', params: {} });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.screenshot', params: {} });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         const base64 = resp.result as string;
         return {
@@ -229,11 +270,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.performance', params: {} });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.performance', params: {} });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -246,11 +286,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.get_errors', params: {} });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.get_errors', params: {} });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -263,11 +302,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.get_logs', params: {} });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.get_logs', params: {} });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -291,11 +329,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         const scenePath = requireString(args, 'scene_path');
         const parentPath = requireString(args, 'parent_path');
         const nodeName = requireString(args, 'node_name');
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.instantiate', params: { scene: scenePath, parent: parentPath, name: nodeName } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.instantiate', params: { scene: scenePath, parent: parentPath, name: nodeName } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: `Instantiated ${scenePath} as "${nodeName}" under ${parentPath}` }] };
       },
@@ -315,11 +352,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
       },
       handler: async (args) => {
         const nodePath = requireString(args, 'node_path');
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.remove_node', params: { path: nodePath } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.remove_node', params: { path: nodePath } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: `Removed node: ${nodePath}` }] };
       },
@@ -339,11 +375,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
       },
       handler: async (args) => {
         const scenePath = requireString(args, 'scene_path');
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.change_scene', params: { scene: scenePath } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.change_scene', params: { scene: scenePath } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: `Changed scene to: ${scenePath}` }] };
       },
@@ -369,11 +404,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         const signal = requireString(args, 'signal_name');
         const receiver = requireString(args, 'receiver_path');
         const method = requireString(args, 'method_name');
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.connect_signal', params: { emitter, signal, receiver, method } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.connect_signal', params: { emitter, signal, receiver, method } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: `Connected ${emitter}.${signal} → ${receiver}.${method}` }] };
       },
@@ -397,11 +431,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         const nodePath = requireString(args, 'node_path');
         const signal = requireString(args, 'signal_name');
         const sigArgs = (args.args as unknown[]) || [];
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.emit_signal', params: { path: nodePath, signal, args: sigArgs } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.emit_signal', params: { path: nodePath, signal, args: sigArgs } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: `Emitted ${signal} on ${nodePath}` }] };
       },
@@ -414,11 +447,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         inputSchema: { type: 'object', properties: {} },
       },
       handler: async (_args) => {
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.get_camera', params: {} });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.get_camera', params: {} });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: JSON.stringify(resp.result, null, 2) }] };
       },
@@ -438,11 +470,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         },
       },
       handler: async (args) => {
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.set_camera', params: { position: args.position, rotation: args.rotation, zoom: args.zoom } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.set_camera', params: { position: args.position, rotation: args.rotation, zoom: args.zoom } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: 'Camera updated.' }] };
       },
@@ -462,11 +493,10 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
       },
       handler: async (args) => {
         const frames = optionalNumber(args, 'frames') || 1;
-        const tcp = server.getTcp();
-        if (!tcp.isConnected()) {
-          return { content: [{ type: 'text', text: 'TCP not connected.' }], isError: true };
+        if (!(await ensureTcpConnected())) {
+          return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const resp = await tcp.send({ id: `${Date.now()}`, method: 'game.wait', params: { frames } });
+        const resp = await server.getTcp().send({ id: `${Date.now()}`, method: 'game.wait', params: { frames } });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         return { content: [{ type: 'text', text: `Waited ${frames} frames.` }] };
       },

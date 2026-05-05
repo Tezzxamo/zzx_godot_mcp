@@ -52,21 +52,27 @@ export function registerProcessTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'launch_editor',
-        description: 'Launch the Godot editor for a specific project.',
+        description: 'Launch the Godot editor for the current project. Use this when WebSocket is not connected.',
         inputSchema: {
           type: 'object',
           properties: {
             project_path: {
               type: 'string',
-              description: 'Absolute path to the Godot project directory (must contain project.godot).',
+              description: 'Absolute path to the Godot project directory (must contain project.godot). Defaults to the detected project path.',
             },
           },
-          required: ['project_path'],
         },
       },
       handler: async (args) => {
-        const projectPath = requireString(args, 'project_path');
+        const projectPath = (args.project_path as string) || server.getConfig().projectPath;
         const godotPath = server.getConfig().godotPath;
+
+        if (!projectPath) {
+          return makeErrorResponse(
+            'No project path available. Provide project_path or set ZZX_PROJECT_PATH env var.',
+            ['Run from a Godot project directory.', 'Set ZZX_PROJECT_PATH environment variable.']
+          );
+        }
 
         if (!fs.existsSync(projectPath)) {
           return makeErrorResponse(
@@ -90,13 +96,20 @@ export function registerProcessTools(server: ZzxGodotServer): void {
           });
           proc.unref();
           return {
-            content: [{ type: 'text', text: `Godot editor launched for project: ${projectPath}` }],
+            content: [{
+              type: 'text',
+              text: `Godot editor launched for project: ${projectPath}\n\n` +
+                    'Next steps:\n' +
+                    '1. Wait 5-10 seconds for the editor to fully load\n' +
+                    '2. In Godot: Project -> Project Settings -> Plugins -> Enable "ZZX Godot MCP"\n' +
+                    '3. MCP WebSocket will auto-connect. Then you can use editor and runtime tools.',
+            }],
           };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           return makeErrorResponse(
             `Failed to launch editor: ${msg}`,
-            ['Ensure Godot is installed correctly.', `Set ${'GODOT_PATH'} env var to the correct executable path.`]
+            ['Ensure Godot is installed correctly.', `Set GODOT_PATH env var to the correct executable path.`]
           );
         }
       },
@@ -185,7 +198,11 @@ export function registerProcessTools(server: ZzxGodotServer): void {
             content: [
               {
                 type: 'text',
-                text: `Godot project started in debug mode.\nProject: ${projectPath}${scene ? '\nScene: ' + scene : ''}\nUse get_debug_output to view logs.`,
+                text: `Godot project started in debug mode.\nProject: ${projectPath}${scene ? '\nScene: ' + scene : ''}\nUse get_debug_output to view logs.\n\n` +
+                      '⚠️  Warning: run_project launches the game directly without the Godot editor.\n' +
+                      'MCP runtime tools (screenshot, eval, get_tree) require the editor plugin TCP server,\n' +
+                      'which only starts when the game is launched from the editor (F5).\n' +
+                      'For full MCP functionality, use launch_editor + runtime_play instead.',
               },
             ],
           };
@@ -193,7 +210,7 @@ export function registerProcessTools(server: ZzxGodotServer): void {
           const msg = err instanceof Error ? err.message : String(err);
           return makeErrorResponse(
             `Failed to run project: ${msg}`,
-            ['Ensure Godot is installed correctly.', `Set ${'GODOT_PATH'} env var to the correct executable path.`]
+            ['Ensure Godot is installed correctly.', `Set GODOT_EXECUTABLE or GODOT_PATH env var to the correct executable path.`]
           );
         }
       },

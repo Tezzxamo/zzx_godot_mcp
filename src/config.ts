@@ -5,6 +5,7 @@
 import {
   DEFAULT_WEBSOCKET_PORT,
   DEFAULT_TCP_PORT,
+  ENV_GODOT_EXECUTABLE,
   ENV_GODOT_PATH,
   ENV_WEBSOCKET_PORT,
   ENV_TCP_PORT,
@@ -21,7 +22,7 @@ let cachedConfig: ConnectionConfig | null = null;
 export function loadConfig(): ConnectionConfig {
   if (cachedConfig) return cachedConfig;
 
-  const godotPath = process.env[ENV_GODOT_PATH] || detectGodotPath();
+  const godotPath = process.env[ENV_GODOT_EXECUTABLE] || process.env[ENV_GODOT_PATH] || detectGodotPath();
   const projectPath = process.env[ENV_PROJECT_PATH] || findProjectRoot(process.cwd()) || process.cwd();
   const websocketPort = parseInt(process.env[ENV_WEBSOCKET_PORT] || String(DEFAULT_WEBSOCKET_PORT), 10);
   const tcpPort = parseInt(process.env[ENV_TCP_PORT] || String(DEFAULT_TCP_PORT), 10);

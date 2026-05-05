@@ -42,7 +42,7 @@ export function detectGodotPath(): string {
   }
 
   // 3. Fallback to bare 'godot' command
-  logger.warn('Could not auto-detect Godot path. Falling back to "godot". Set GODOT_PATH env var.');
+  logger.warn('Could not auto-detect Godot path. Falling back to "godot". Set GODOT_EXECUTABLE or GODOT_PATH env var.');
   return 'godot';
 }
 

@@ -2,15 +2,16 @@
 
 Full-featured MCP server for Godot 4.6.x game development. Supports 2D, HD-2D, and 3D games.
 
-**157 tools** across 15 categories for AI-driven game development via [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
+**167 tools** across 17 categories for AI-driven game development via [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
 
 ## Features
 
 - **2D / HD-2D / 3D Full Coverage** — Dedicated toolsets for each game type
 - **Dual-Mode Architecture** — Editor real-time control + Headless file operations
 - **Runtime Game Control** — Debug, inspect, and manipulate running games via TCP
+- **Auto-Reconnect** — WebSocket retries every 5s; TCP auto-connects after `runtime_play`
 - **Kimi Code CLI Optimized** — One-command setup, Chinese-friendly descriptions
-- **157 MCP Tools** — Scene, node, script, project, rendering, physics, audio, UI, networking, and more
+- **167 MCP Tools** — Scene, node, script, project, rendering, physics, audio, UI, networking, docs, and more
 
 ## Architecture
 
@@ -43,23 +44,24 @@ npm run build
 kimi mcp add zzx-godot-mcp \
   --command "node" \
   --args "/absolute/path/to/zzx-godot-mcp/dist/index.js" \
-  --env GODOT_PATH="/path/to/godot"
+  --env GODOT_EXECUTABLE="/path/to/godot"
 
 # Test connection
 kimi mcp test zzx-godot-mcp
 ```
 
-## Godot Editor Plugin Setup (Optional, for real-time control)
+## Godot Editor Plugin Setup (Required for editor/runtime tools)
 
 1. Copy `addons/zzx_godot_mcp/` to your Godot project's `addons/` folder
 2. Enable **ZZX Godot MCP** in Project Settings → Plugins
-3. The WebSocket server auto-starts on port 9678
+3. The WebSocket server auto-starts on port 9678; TCP server auto-starts on port 9679
 
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `GODOT_PATH` | auto-detect | Path to Godot executable |
+| `GODOT_EXECUTABLE` | auto-detect | Path to Godot executable (preferred) |
+| `GODOT_PATH` | auto-detect | Alias for `GODOT_EXECUTABLE` |
 | `ZZX_WEBSOCKET_PORT` | 9678 | WebSocket port (Editor) |
 | `ZZX_TCP_PORT` | 9679 | TCP port (Runtime) |
 | `ZZX_LOG_LEVEL` | info | Log level: silent/error/warn/info/debug |
@@ -69,7 +71,7 @@ kimi mcp test zzx-godot-mcp
 
 | Category | Tools | Description |
 |----------|-------|-------------|
-| Scene | 12 | Create, open, save, analyze scenes |
+| Scene | 13 | Create, open, save, analyze, editor screenshot |
 | Node | 15 | Add, delete, rename, reparent, batch update |
 | Script | 10 | Create, edit, attach, validate, templates |
 | Project | 8 | Create project, autoloads, input map, layers |
@@ -93,8 +95,10 @@ kimi mcp test zzx-godot-mcp
 "Add a CharacterBody2D player with movement script"
 "Create a TileMap with a Ground layer"
 "Set up pixel-perfect rendering for HD-2D look"
+"Launch the Godot editor and enable the MCP plugin"
 "Play the main scene and take a screenshot"
 "Get the player's position in the running game"
+"Take a screenshot of the Godot editor viewport"
 "Add a PointLight2D for HD-2D lighting"
 "Create a 3D scene with MeshInstance3D and Camera3D"
 "Connect the player's death signal to the game manager"

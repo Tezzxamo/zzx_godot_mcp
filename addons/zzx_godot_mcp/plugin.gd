@@ -17,6 +17,7 @@ func _enter_tree():
 	# TCP server for runtime game (started when game runs)
 	tcp_server = TcpServer.new()
 	add_child(tcp_server)
+	tcp_server.start(9679)
 	
 	# Add dock panel
 	panel = preload("ui/mcp_panel.tscn").instantiate() if ResourceLoader.exists("res://addons/zzx_godot_mcp/ui/mcp_panel.tscn") else null

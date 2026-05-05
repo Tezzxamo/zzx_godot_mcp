@@ -78,14 +78,29 @@ func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
 		
 		"game.eval":
 			var code = params.get("code", "")
+			
+			# Mode A: Expression (simple expressions, no control flow)
 			var expr = Expression.new()
 			var parse_err = expr.parse(code)
-			if parse_err != OK:
-				return { "error": "Parse error: " + expr.get_error_text() }
-			var result = expr.execute([], tree.current_scene)
-			if expr.has_execute_failed():
-				return { "error": expr.get_error_text() }
-			return result if result != null else null
+			if parse_err == OK:
+				var expr_result = expr.execute([], tree.current_scene)
+				if not expr.has_execute_failed():
+					return expr_result if expr_result != null else null
+			
+			# Mode B: Temporary GDScript node (full GDScript support)
+			var script = GDScript.new()
+			script.source_code = "extends Node\nfunc zzx_mcp_eval(context):\n\t" + code.replace("\n", "\n\t") + "\n"
+			var reload_err = script.reload()
+			if reload_err != OK:
+				return { "error": "Compile error: " + script.get_error_text() }
+			
+			var temp = Node.new()
+			temp.name = "ZZXMCP_Eval_" + str(randi())
+			temp.set_script(script)
+			tree.current_scene.add_child(temp)
+			var eval_result = temp.call("zzx_mcp_eval", tree.current_scene)
+			temp.queue_free()
+			return eval_result if eval_result != null else null
 		
 		"game.get_tree":
 			return _serialize_node(tree.current_scene)
@@ -184,10 +199,22 @@ func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
 			await tree.create_timer(frames / Engine.get_frames_per_second()).timeout
 			return { "waited": frames }
 		
+		"game.get_errors":
+			var log_path = OS.get_user_data_dir() + "/logs/godot.log"
+			var lines = _read_log_file(log_path)
+			var errors = lines.filter(func(l): return l.contains("ERROR") or l.contains("SCRIPT ERROR"))
+			return { "errors": errors }
+		
+		"game.get_logs":
+			var log_path = OS.get_user_data_dir() + "/logs/godot.log"
+			return { "logs": _read_log_file(log_path) }
+		
 		_:
 			return { "error": "Unknown method: " + method }
 
 func _serialize_node(node: Node) -> Dictionary:
+	if not is_instance_valid(node) or node == null:
+		return { "name": "<invalid>", "type": "null", "path": "", "children": [] }
 	var result = {
 		"name": node.name,
 		"type": node.get_class(),
@@ -195,8 +222,21 @@ func _serialize_node(node: Node) -> Dictionary:
 		"children": []
 	}
 	for child in node.get_children():
-		result.children.append(_serialize_node(child))
+		if is_instance_valid(child):
+			result.children.append(_serialize_node(child))
 	return result
+
+func _read_log_file(log_path: String, max_lines: int = 100) -> Array:
+	if not FileAccess.file_exists(log_path):
+		return []
+	var file = FileAccess.open(log_path, FileAccess.READ)
+	var lines = []
+	while not file.eof_reached():
+		lines.append(file.get_line())
+	file.close()
+	if lines.size() > max_lines:
+		lines = lines.slice(lines.size() - max_lines, lines.size())
+	return lines
 
 func _dict_to_vector(d: Dictionary) -> Variant:
 	if d.has("z"):
