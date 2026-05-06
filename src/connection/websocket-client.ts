@@ -12,6 +12,7 @@ export class WebSocketClient extends BaseConnection {
   private url: string;
   private ws: WebSocket | null = null;
   private pendingRequests = new Map<string, (response: GodotResponse) => void>();
+  onDisconnect: (() => void) | null = null;
 
   constructor(port: number) {
     super();
@@ -56,6 +57,9 @@ export class WebSocketClient extends BaseConnection {
         this.connected = false;
         this.ws = null;
         logger.info('WebSocket disconnected');
+        if (this.onDisconnect) {
+          this.onDisconnect();
+        }
       });
     });
   }

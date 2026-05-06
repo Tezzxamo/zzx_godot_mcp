@@ -86,11 +86,14 @@ func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
 		"game.eval":
 			var code = params.get("code", "")
 			
+			# Use tree.root as fallback context when no scene is running
+			var context = tree.current_scene if tree.current_scene != null else tree.root
+			
 			# Mode A: Expression (simple expressions, no control flow)
 			var expr = Expression.new()
 			var parse_err = expr.parse(code)
 			if parse_err == OK:
-				var expr_result = expr.execute([], tree.current_scene)
+				var expr_result = expr.execute([], context)
 				if not expr.has_execute_failed():
 					return expr_result if expr_result != null else null
 			
@@ -104,8 +107,8 @@ func _handle_runtime_command(method: String, params: Dictionary) -> Variant:
 			var temp = Node.new()
 			temp.name = "ZZXMCP_Eval_" + str(randi())
 			temp.set_script(script)
-			tree.current_scene.add_child(temp)
-			var eval_result = temp.call("zzx_mcp_eval", tree.current_scene)
+			context.add_child(temp)
+			var eval_result = temp.call("zzx_mcp_eval", context)
 			temp.queue_free()
 			return eval_result if eval_result != null else null
 		

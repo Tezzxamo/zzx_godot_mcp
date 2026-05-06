@@ -30,13 +30,11 @@ func handle_command(method: String, params: Dictionary) -> Variant:
 				var viewport = editor.get_editor_viewport_3d() if editor.get_editor_viewport_3d() else editor.get_editor_viewport_2d()
 				var img = viewport.get_texture().get_image()
 				var output_path = params.get("output_path", "")
-				if not output_path.is_empty():
-					var err = img.save_png(output_path)
-					if err == OK:
-						return { "saved": output_path }
-					else:
-						return { "error": "Failed to save screenshot: " + str(err) }
-				return Marshalls.raw_to_base64(img.save_png_to_buffer())
+				var err = img.save_png(output_path)
+				if err == OK:
+					return { "saved": output_path }
+				else:
+					return { "error": "Failed to save screenshot: " + str(err) }
 			return { "error": "No editor" }
 		
 		"runtime.play":

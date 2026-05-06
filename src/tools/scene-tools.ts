@@ -111,13 +111,13 @@ export function registerSceneTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'editor_screenshot',
-        description: 'Capture a screenshot from the Godot editor viewport (requires WebSocket). Returns base64 PNG by default, or saves to file if output_path is provided. Use this when the game is not running or for inspecting the editor UI.',
+        description: 'Capture a screenshot from the Godot editor viewport (requires WebSocket) and save as PNG file. If output_path is omitted, auto-saves to project/screenshots/ with a timestamp filename.',
         inputSchema: {
           type: 'object',
           properties: {
             output_path: {
               type: 'string',
-              description: 'Optional absolute file path to save the PNG screenshot (e.g. "E:/project/screenshot.png"). If omitted, returns base64 image data.',
+              description: 'Absolute file path to save the PNG screenshot. If omitted, defaults to projectPath/screenshots/editor_YYYYMMDD_HHMMSS_mmm.png.',
             },
           },
         },
@@ -137,26 +137,27 @@ export function registerSceneTools(server: ZzxGodotServer): void {
             isError: true,
           };
         }
-        const outputPath = args.output_path as string | undefined;
+        let outputPath = args.output_path as string | undefined;
+        if (!outputPath) {
+          const now = new Date();
+          const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}_${String(now.getMilliseconds()).padStart(3, '0')}`;
+          const dir = path.join(projectPath, 'screenshots');
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          outputPath = path.join(dir, `editor_${ts}.png`);
+        }
         const resp = await ws.send({
           id: `${Date.now()}`,
           method: 'editor.take_screenshot',
-          params: outputPath ? { output_path: outputPath } : {},
+          params: { output_path: outputPath },
         });
         if (resp.error) {
           return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
         }
-        const result = resp.result as Record<string, unknown> | string;
-        if (result && typeof result === 'object' && result.saved) {
+        const result = resp.result as Record<string, unknown>;
+        if (result.saved) {
           return { content: [{ type: 'text', text: `Screenshot saved to: ${result.saved}` }] };
         }
-        const base64 = result as string;
-        return {
-          content: [
-            { type: 'text', text: 'Editor screenshot captured:' },
-            { type: 'image', data: base64, mimeType: 'image/png' },
-          ],
-        };
+        return { content: [{ type: 'text', text: `Screenshot save failed: ${JSON.stringify(result)}` }], isError: true };
       },
       readOnly: true,
     },

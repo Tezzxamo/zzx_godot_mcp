@@ -142,6 +142,17 @@ export class ZzxGodotServer {
         clearInterval(this.reconnectInterval);
         this.reconnectInterval = null;
       }
+      // Set up disconnect callback to auto-reconnect
+      this.websocket.onDisconnect = () => {
+        logger.warn('WebSocket disconnected. Will retry every 5s...');
+        if (!this.reconnectInterval) {
+          this.reconnectInterval = setInterval(() => {
+            this.tryConnectWebSocket().catch(() => {
+              // Error already logged inside tryConnectWebSocket
+            });
+          }, 5000);
+        }
+      };
       logger.info('WebSocket connected to Godot Editor.');
     } catch {
       logger.warn(`WebSocket not available at port ${this.config.websocketPort}. Will retry every 5s...`);

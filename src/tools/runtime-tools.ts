@@ -2,6 +2,8 @@
  * zzx-godot-mcp — Runtime Game Control Tools (20 tools)
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import type { ZzxGodotServer } from '../server.js';
 import type { ToolRegistration } from '../types/index.js';
 import { requireString, optionalString, optionalNumber, requireBoolean } from '../utils/validators.js';
@@ -244,13 +246,13 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
     {
       definition: {
         name: 'runtime_screenshot',
-        description: 'Capture a screenshot from the running game (requires TCP). Returns base64 PNG by default, or saves to file if output_path is provided. Note: screenshots require a running game with rendering. Headless mode (--headless) produces black images; use this tool or editor_screenshot instead.',
+        description: 'Capture a screenshot from the running game (requires TCP) and save as PNG file. If output_path is omitted, auto-saves to project/screenshots/ with a timestamp filename. Note: screenshots require a running game with rendering. Headless mode (--headless) produces black images; use this tool or editor_screenshot instead.',
         inputSchema: {
           type: 'object',
           properties: {
             output_path: {
               type: 'string',
-              description: 'Optional absolute file path to save the PNG screenshot (e.g. "E:/project/screenshot.png"). If omitted, returns base64 image data.',
+              description: 'Absolute file path to save the PNG screenshot. If omitted, defaults to projectPath/screenshots/runtime_YYYYMMDD_HHMMSS_mmm.png.',
             },
           },
         },
@@ -259,24 +261,25 @@ export function registerRuntimeTools(server: ZzxGodotServer): void {
         if (!(await ensureTcpConnected())) {
           return { content: [{ type: 'text', text: TCP_ERROR_MSG }], isError: true };
         }
-        const outputPath = args.output_path as string | undefined;
+        let outputPath = args.output_path as string | undefined;
+        if (!outputPath) {
+          const now = new Date();
+          const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}_${String(now.getMilliseconds()).padStart(3, '0')}`;
+          const dir = path.join(server.getConfig().projectPath || process.cwd(), 'screenshots');
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          outputPath = path.join(dir, `runtime_${ts}.png`);
+        }
         const resp = await server.getTcp().send({
           id: `${Date.now()}`,
           method: 'game.screenshot',
-          params: outputPath ? { output_path: outputPath } : {},
+          params: { output_path: outputPath },
         });
         if (resp.error) return { content: [{ type: 'text', text: `Error: ${resp.error.message}` }], isError: true };
-        const result = resp.result as Record<string, unknown> | string;
-        if (result && typeof result === 'object' && result.saved) {
+        const result = resp.result as Record<string, unknown>;
+        if (result.saved) {
           return { content: [{ type: 'text', text: `Screenshot saved to: ${result.saved}` }] };
         }
-        const base64 = result as string;
-        return {
-          content: [
-            { type: 'text', text: 'Screenshot captured:' },
-            { type: 'image', data: base64, mimeType: 'image/png' },
-          ],
-        };
+        return { content: [{ type: 'text', text: `Screenshot save failed: ${JSON.stringify(result)}` }], isError: true };
       },
       readOnly: true,
     },
